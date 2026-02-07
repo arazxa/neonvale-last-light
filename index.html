@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Last Light of Neonvale</title>
+    <title>Last Light of Neonvale - Phase 1</title>
     <style>
       :root {
         color-scheme: dark;
@@ -12,10 +12,10 @@
 
       body {
         margin: 0;
-        background: radial-gradient(circle at top, #0b0f1a, #040408 60%);
-        color: #c9f7ff;
-        display: flex;
+        background: radial-gradient(circle at top, #101526, #040408 60%);
+        color: #d7f7ff;
         min-height: 100vh;
+        display: flex;
         align-items: center;
         justify-content: center;
       }
@@ -40,7 +40,7 @@
         max-width: 960px;
         text-align: center;
         line-height: 1.5;
-        font-size: 0.98rem;
+        font-size: 0.95rem;
         opacity: 0.9;
       }
 
@@ -53,244 +53,645 @@
     <div class="frame">
       <canvas id="game" width="320" height="180" aria-label="Last Light of Neonvale"></canvas>
       <div class="panel">
-        <div><strong>Move:</strong> Arrow keys or WASD</div>
-        <div>Find the Light Node and restore Neonvale.</div>
+        <div><strong>Move:</strong> WASD / Arrow keys</div>
+        <div><strong>Interact:</strong> E or Space | <strong>Repair:</strong> R | <strong>Pause:</strong> P</div>
+        <div>Restore the first Light Node in Central Plaza.</div>
       </div>
     </div>
 
     <script>
+      // =========================
+      // Core Configuration
+      // =========================
       const canvas = document.getElementById("game");
       const ctx = canvas.getContext("2d");
 
-      const world = {
-        width: 320,
-        height: 180,
-        streets: [
-          { y: 112, height: 22 },
-          { y: 140, height: 18 },
-        ],
-        buildings: [
-          { x: 24, y: 40, w: 46, h: 58 },
-          { x: 78, y: 22, w: 44, h: 76 },
-          { x: 130, y: 50, w: 34, h: 48 },
-          { x: 172, y: 30, w: 52, h: 70 },
-          { x: 228, y: 42, w: 58, h: 64 },
-        ],
+      const TILE = 16;
+      const MAP_COLS = 20;
+      const MAP_ROWS = 11;
+      const DAY_LENGTH_SECONDS = 120;
+      const SAVE_KEY = "neonvale_phase1_save";
+
+      const palette = {
+        night: "#07080f",
+        dawn: "#101f3a",
+        day: "#243a64",
+        ground: "#0f1724",
+        path: "#1c2a3f",
+        accent: "#49f4ff",
+        uiDark: "rgba(5, 10, 20, 0.8)",
+        uiLight: "#e9fbff",
+        neon: "#7ef9ff",
+        warning: "#ffc86a",
+        npc: "#ff7ad9",
+        nodeOff: "#2c3546",
+        nodeOn: "#ffe979",
+        resourceScrap: "#c3b6a2",
+        resourceCell: "#6dffac",
+        resourceShard: "#8bb6ff",
+      };
+
+      const tileMap = [
+        "22222222222222222222",
+        "20000000000000000002",
+        "20000011111111000002",
+        "20000011111111000002",
+        "20000011111111000002",
+        "20000000000000000002",
+        "20001111111111100002",
+        "20001111111111100002",
+        "20000000000000000002",
+        "20000000000000000002",
+        "22222222222222222222",
+      ];
+
+      const zones = {
+        central: {
+          id: "central",
+          name: "Central Plaza",
+          unlocked: true,
+          portals: [],
+        },
+        market: { id: "market", name: "Abandoned Market", unlocked: false, portals: [] },
+        power: { id: "power", name: "Power District", unlocked: false, portals: [] },
+        residential: { id: "residential", name: "Residential Block", unlocked: false, portals: [] },
+        forest: { id: "forest", name: "Neon Forest", unlocked: false, portals: [] },
+      };
+
+      const state = {
+        zone: "central",
+        day: 1,
+        timeOfDay: 0.25,
+        paused: false,
+        hint: "Explore Central Plaza.",
+        dialogue: "",
+        energy: 100,
+        maxEnergy: 100,
+        lightLevel: 0,
+        resources: {
+          scrap: 0,
+          cells: 0,
+          shards: 0,
+        },
+        relationship: {
+          Mira: 10,
+        },
+        quests: {
+          main: {
+            id: "main",
+            title: "Relight Central Plaza",
+            type: "repair",
+            status: "active",
+            description: "Gather materials and repair the Light Node.",
+            requirements: { scrap: 3, cells: 1, shards: 2 },
+            progress: 0,
+          },
+          side: {
+            id: "side",
+            title: "Scrap for Mira",
+            type: "fetch",
+            status: "active",
+            description: "Bring 2 scrap to Mira.",
+            requirements: { scrap: 2 },
+            progress: 0,
+          },
+        },
+        activeQuest: "main",
+        repair: {
+          active: false,
+          progress: 0,
+        },
+        saveTimer: 0,
       };
 
       const player = {
-        x: 32,
-        y: 132,
-        w: 8,
+        x: 3 * TILE,
+        y: 7 * TILE,
+        w: 10,
         h: 12,
-        speed: 1.1,
+        speed: 48,
+      };
+
+      const npc = {
+        name: "Mira",
+        x: 7 * TILE,
+        y: 4 * TILE,
+        w: 10,
+        h: 12,
+        routine: [
+          { start: 0.2, end: 0.55, x: 7 * TILE, y: 4 * TILE },
+          { start: 0.55, end: 0.75, x: 10 * TILE, y: 6 * TILE },
+          { start: 0.75, end: 0.95, x: 5 * TILE, y: 8 * TILE },
+        ],
       };
 
       const lightNode = {
-        x: 272,
-        y: 108,
+        x: 14 * TILE,
+        y: 5 * TILE,
         w: 14,
-        h: 18,
-        activated: false,
+        h: 16,
+        restored: false,
+        requirements: { scrap: 3, cells: 1, shards: 2 },
       };
+
+      const resources = [
+        { id: "scrap-1", type: "scrap", x: 5 * TILE, y: 8 * TILE, available: true },
+        { id: "scrap-2", type: "scrap", x: 9 * TILE, y: 2 * TILE, available: true },
+        { id: "scrap-3", type: "scrap", x: 15 * TILE, y: 7 * TILE, available: true },
+        { id: "cells-1", type: "cells", x: 4 * TILE, y: 4 * TILE, available: true },
+        { id: "shards-1", type: "shards", x: 12 * TILE, y: 3 * TILE, available: true },
+        { id: "shards-2", type: "shards", x: 17 * TILE, y: 8 * TILE, available: true },
+      ];
 
       const keys = new Set();
-      let restoration = 0;
-      let sparkleTimer = 0;
+      let lastTime = 0;
 
-      const colors = {
-        skyDark: "#020208",
-        skyLight: "#0d1d38",
-        groundDark: "#040408",
-        groundLight: "#1c3c2c",
-        buildingDark: "#121620",
-        buildingLight: "#1e2c44",
-        neonEdge: "#2ffbff",
-        lightNodeOff: "#26303b",
-        lightNodeOn: "#ffe66b",
-        player: "#4ff2ff",
-      };
+      // =========================
+      // Utility Helpers
+      // =========================
+      const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
-      function lerpColor(a, b, t) {
+      function lerp(a, b, t) {
+        return a + (b - a) * t;
+      }
+
+      function colorBlend(hexA, hexB, t) {
         const parse = (hex) => hex.match(/\w\w/g).map((v) => parseInt(v, 16));
-        const [ar, ag, ab] = parse(a);
-        const [br, bg, bb] = parse(b);
-        const r = Math.round(ar + (br - ar) * t);
-        const g = Math.round(ag + (bg - ag) * t);
-        const b2 = Math.round(ab + (bb - ab) * t);
-        return `rgb(${r}, ${g}, ${b2})`;
+        const [ar, ag, ab] = parse(hexA);
+        const [br, bg, bb] = parse(hexB);
+        return `rgb(${Math.round(lerp(ar, br, t))}, ${Math.round(lerp(ag, bg, t))}, ${Math.round(
+          lerp(ab, bb, t)
+        )})`;
       }
 
-      function clamp(value, min, max) {
-        return Math.max(min, Math.min(max, value));
+      function rectsOverlap(a, b) {
+        return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
       }
 
-      function handleInput() {
+      function distance(a, b) {
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        return Math.hypot(dx, dy);
+      }
+
+      function getTile(col, row) {
+        if (row < 0 || row >= MAP_ROWS || col < 0 || col >= MAP_COLS) return 2;
+        return parseInt(tileMap[row][col], 10);
+      }
+
+      function isWalkable(col, row) {
+        const tile = getTile(col, row);
+        return tile === 0 || tile === 1;
+      }
+
+      // =========================
+      // Input + State Management
+      // =========================
+      function movePlayer(dt) {
         let dx = 0;
         let dy = 0;
-        if (keys.has("ArrowLeft") || keys.has("a")) dx -= 1;
-        if (keys.has("ArrowRight") || keys.has("d")) dx += 1;
-        if (keys.has("ArrowUp") || keys.has("w")) dy -= 1;
-        if (keys.has("ArrowDown") || keys.has("s")) dy += 1;
+        if (keys.has("arrowleft") || keys.has("a")) dx -= 1;
+        if (keys.has("arrowright") || keys.has("d")) dx += 1;
+        if (keys.has("arrowup") || keys.has("w")) dy -= 1;
+        if (keys.has("arrowdown") || keys.has("s")) dy += 1;
 
         if (dx !== 0 && dy !== 0) {
           dx *= 0.7;
           dy *= 0.7;
         }
 
-        player.x = clamp(player.x + dx * player.speed, 10, world.width - 10);
-        player.y = clamp(player.y + dy * player.speed, 96, world.height - 16);
+        const speed = player.speed * dt;
+        const newX = player.x + dx * speed;
+        const newY = player.y + dy * speed;
+
+        if (state.energy > 0 && (dx !== 0 || dy !== 0)) {
+          state.energy = clamp(state.energy - 8 * dt, 0, state.maxEnergy);
+        }
+
+        const next = { x: newX, y: player.y, w: player.w, h: player.h };
+        if (canMoveTo(next)) player.x = newX;
+
+        const nextY = { x: player.x, y: newY, w: player.w, h: player.h };
+        if (canMoveTo(nextY)) player.y = newY;
       }
 
-      function playerHitsNode() {
-        return (
-          player.x < lightNode.x + lightNode.w &&
-          player.x + player.w > lightNode.x &&
-          player.y < lightNode.y + lightNode.h &&
-          player.y + player.h > lightNode.y
+      function canMoveTo(rect) {
+        const corners = [
+          { x: rect.x, y: rect.y },
+          { x: rect.x + rect.w, y: rect.y },
+          { x: rect.x, y: rect.y + rect.h },
+          { x: rect.x + rect.w, y: rect.y + rect.h },
+        ];
+        return corners.every((corner) => {
+          const col = Math.floor(corner.x / TILE);
+          const row = Math.floor(corner.y / TILE);
+          return isWalkable(col, row);
+        });
+      }
+
+      function setHint(text) {
+        state.hint = text;
+      }
+
+      // =========================
+      // NPC + Quest Logic
+      // =========================
+      function updateNpc(dt) {
+        const routine = npc.routine.find(
+          (step) => state.timeOfDay >= step.start && state.timeOfDay < step.end
         );
-      }
+        if (!routine) return;
 
-      function drawPixelBlock(x, y, w, h, color, edgeColor) {
-        ctx.fillStyle = color;
-        ctx.fillRect(x, y, w, h);
-        ctx.fillStyle = edgeColor;
-        ctx.fillRect(x + 1, y + 1, w - 2, 2);
-        ctx.fillRect(x + 1, y + 1, 2, h - 2);
-      }
-
-      function drawScene() {
-        const sky = lerpColor(colors.skyDark, colors.skyLight, restoration);
-        const ground = lerpColor(colors.groundDark, colors.groundLight, restoration);
-        const building = lerpColor(colors.buildingDark, colors.buildingLight, restoration);
-
-        ctx.fillStyle = sky;
-        ctx.fillRect(0, 0, world.width, world.height);
-
-        world.buildings.forEach((block) => {
-          drawPixelBlock(block.x, block.y, block.w, block.h, building, colors.neonEdge);
-          ctx.fillStyle = restoration > 0.2 ? "rgba(79, 242, 255, 0.3)" : "rgba(0,0,0,0.4)";
-          for (let i = 0; i < block.w; i += 8) {
-            ctx.fillRect(block.x + 4 + i, block.y + 10, 3, 6);
-          }
-        });
-
-        ctx.fillStyle = ground;
-        ctx.fillRect(0, 110, world.width, world.height - 110);
-        world.streets.forEach((street) => {
-          ctx.fillStyle = restoration > 0.1 ? "#13253b" : "#08080d";
-          ctx.fillRect(0, street.y, world.width, street.height);
-        });
-
-        ctx.fillStyle = restoration > 0.3 ? "#49c97b" : "#060709";
-        ctx.fillRect(0, 156, world.width, 24);
-
-        drawLightNode();
-        drawPlayer();
-
-        if (restoration >= 1) {
-          drawVictory();
+        const target = { x: routine.x, y: routine.y };
+        const toTarget = {
+          x: target.x - npc.x,
+          y: target.y - npc.y,
+        };
+        const dist = Math.hypot(toTarget.x, toTarget.y);
+        if (dist > 1) {
+          npc.x += (toTarget.x / dist) * dt * 20;
+          npc.y += (toTarget.y / dist) * dt * 20;
         }
       }
 
+      function handleNpcInteraction() {
+        if (distance(player, npc) < 18) {
+          state.dialogue = "Mira: The plaza hums again. Bring scrap and we'll fix the node.";
+          state.relationship.Mira = clamp(state.relationship.Mira + 1, 0, 100);
+
+          const sideQuest = state.quests.side;
+          if (sideQuest.status === "active" && state.resources.scrap >= 2) {
+            state.resources.scrap -= 2;
+            sideQuest.status = "complete";
+            state.lightLevel = clamp(state.lightLevel + 10, 0, 100);
+            state.maxEnergy = clamp(state.maxEnergy + 10, 0, 140);
+            state.dialogue = "Mira: Perfect. Here's a battery upgrade for you.";
+          }
+        }
+      }
+
+      function updateQuestProgress() {
+        const mainQuest = state.quests.main;
+        mainQuest.progress = lightNode.restored ? 1 : 0;
+        if (lightNode.restored) {
+          mainQuest.status = "complete";
+        }
+      }
+
+      // =========================
+      // Resource + Repair Logic
+      // =========================
+      function collectResource() {
+        const nearby = resources.find(
+          (node) => node.available && Math.hypot(node.x - player.x, node.y - player.y) < 16
+        );
+        if (!nearby || state.energy < 5) return;
+
+        nearby.available = false;
+        state.energy = clamp(state.energy - 5, 0, state.maxEnergy);
+
+        if (nearby.type === "scrap") state.resources.scrap += 1;
+        if (nearby.type === "cells") state.resources.cells += 1;
+        if (nearby.type === "shards") state.resources.shards += 1;
+      }
+
+      function canAfford(requirements) {
+        return (
+          state.resources.scrap >= requirements.scrap &&
+          state.resources.cells >= requirements.cells &&
+          state.resources.shards >= requirements.shards
+        );
+      }
+
+      function payResources(requirements) {
+        state.resources.scrap -= requirements.scrap;
+        state.resources.cells -= requirements.cells;
+        state.resources.shards -= requirements.shards;
+      }
+
+      function startRepair() {
+        if (lightNode.restored || state.repair.active) return;
+        if (distance(player, lightNode) > 20) return;
+        if (!canAfford(lightNode.requirements)) {
+          state.dialogue = "Not enough materials to repair the Light Node.";
+          return;
+        }
+
+        payResources(lightNode.requirements);
+        state.repair.active = true;
+        state.repair.progress = 0;
+      }
+
+      function updateRepair(dt) {
+        if (!state.repair.active) return;
+        const holding = keys.has(" ") || keys.has("e");
+        const rate = holding ? 0.45 : -0.2;
+        state.repair.progress = clamp(state.repair.progress + rate * dt, 0, 1);
+        state.energy = clamp(state.energy - 12 * dt, 0, state.maxEnergy);
+
+        if (state.repair.progress >= 1) {
+          state.repair.active = false;
+          lightNode.restored = true;
+          state.lightLevel = clamp(state.lightLevel + 60, 0, 100);
+          state.dialogue = "Power rerouted. Neonvale glows again.";
+        }
+      }
+
+      // =========================
+      // Day/Night + Save System
+      // =========================
+      function updateDayCycle(dt) {
+        const dayStep = dt / DAY_LENGTH_SECONDS;
+        state.timeOfDay += dayStep;
+        if (state.timeOfDay >= 1) {
+          state.timeOfDay = 0;
+          state.day += 1;
+          state.energy = state.maxEnergy;
+          resources.forEach((node) => (node.available = true));
+        }
+      }
+
+      function saveGame() {
+        const payload = {
+          day: state.day,
+          timeOfDay: state.timeOfDay,
+          energy: state.energy,
+          maxEnergy: state.maxEnergy,
+          lightLevel: state.lightLevel,
+          resources: state.resources,
+          relationship: state.relationship,
+          quests: state.quests,
+          lightNode: { restored: lightNode.restored },
+        };
+        localStorage.setItem(SAVE_KEY, JSON.stringify(payload));
+      }
+
+      function loadGame() {
+        const raw = localStorage.getItem(SAVE_KEY);
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        state.day = data.day ?? state.day;
+        state.timeOfDay = data.timeOfDay ?? state.timeOfDay;
+        state.energy = data.energy ?? state.energy;
+        state.maxEnergy = data.maxEnergy ?? state.maxEnergy;
+        state.lightLevel = data.lightLevel ?? state.lightLevel;
+        state.resources = data.resources ?? state.resources;
+        state.relationship = data.relationship ?? state.relationship;
+        state.quests = data.quests ?? state.quests;
+        lightNode.restored = data.lightNode?.restored ?? lightNode.restored;
+      }
+
+      // =========================
+      // Rendering
+      // =========================
+      function drawMap() {
+        for (let row = 0; row < MAP_ROWS; row += 1) {
+          for (let col = 0; col < MAP_COLS; col += 1) {
+            const tile = getTile(col, row);
+            let fill = palette.ground;
+            if (tile === 1) fill = palette.path;
+            if (tile === 2) fill = "#121826";
+            ctx.fillStyle = fill;
+            ctx.fillRect(col * TILE, row * TILE, TILE, TILE);
+          }
+        }
+      }
+
+      function drawResources() {
+        resources.forEach((node) => {
+          if (!node.available) return;
+          let color = palette.resourceScrap;
+          if (node.type === "cells") color = palette.resourceCell;
+          if (node.type === "shards") color = palette.resourceShard;
+          ctx.fillStyle = color;
+          ctx.fillRect(node.x + 2, node.y + 6, 6, 6);
+          ctx.fillStyle = "rgba(0,0,0,0.35)";
+          ctx.fillRect(node.x + 2, node.y + 6, 6, 2);
+        });
+      }
+
+      function drawNpc() {
+        ctx.fillStyle = palette.npc;
+        ctx.fillRect(npc.x, npc.y, npc.w, npc.h);
+        ctx.fillStyle = "#1a0f22";
+        ctx.fillRect(npc.x + 2, npc.y + 2, 6, 3);
+      }
+
       function drawLightNode() {
-        const glow = lightNode.activated
-          ? `rgba(255, 230, 107, ${0.6 + Math.sin(sparkleTimer) * 0.2})`
-          : "rgba(20, 30, 40, 0.5)";
+        const glow = lightNode.restored ? "rgba(255, 233, 121, 0.6)" : "rgba(32, 41, 60, 0.4)";
         ctx.fillStyle = glow;
         ctx.fillRect(lightNode.x - 4, lightNode.y - 4, lightNode.w + 8, lightNode.h + 8);
-
-        ctx.fillStyle = lightNode.activated ? colors.lightNodeOn : colors.lightNodeOff;
+        ctx.fillStyle = lightNode.restored ? palette.nodeOn : palette.nodeOff;
         ctx.fillRect(lightNode.x, lightNode.y, lightNode.w, lightNode.h);
-        ctx.fillStyle = "#1b1f2b";
-        ctx.fillRect(lightNode.x + 3, lightNode.y + 4, lightNode.w - 6, 4);
-        ctx.fillStyle = lightNode.activated ? "#fff3c9" : "#38404a";
+        ctx.fillStyle = "#1a1f2b";
+        ctx.fillRect(lightNode.x + 3, lightNode.y + 4, lightNode.w - 6, 3);
+        ctx.fillStyle = lightNode.restored ? "#fff4c7" : "#38405a";
         ctx.fillRect(lightNode.x + 2, lightNode.y + 10, lightNode.w - 4, 4);
       }
 
       function drawPlayer() {
-        const x = player.x;
-        const y = player.y;
-        const palette = {
-          outline: "#0c0f16",
-          hair: "#2b1b14",
-          bandana: "#e6403a",
-          skin: "#ffb266",
-          highlight: "#ffd7a8",
-          shirt: "#c5392f",
-          sleeve: "#c6c9d1",
-          belt: "#1f2329",
-          pants: "#d42d2d",
-          boot: "#1d1f24",
-        };
-
-        ctx.fillStyle = palette.outline;
-        ctx.fillRect(x, y, player.w, player.h);
-
-        ctx.fillStyle = palette.skin;
-        ctx.fillRect(x + 1, y + 1, 6, 4);
-        ctx.fillStyle = palette.hair;
-        ctx.fillRect(x + 1, y + 1, 6, 1);
-        ctx.fillRect(x + 1, y + 1, 2, 2);
-        ctx.fillRect(x + 5, y + 1, 2, 2);
-
-        ctx.fillStyle = palette.bandana;
-        ctx.fillRect(x + 1, y + 2, 6, 1);
-        ctx.fillRect(x, y + 3, 1, 1);
-
-        ctx.fillStyle = palette.outline;
-        ctx.fillRect(x + 2, y + 3, 1, 1);
-        ctx.fillRect(x + 5, y + 3, 1, 1);
-        ctx.fillStyle = palette.highlight;
-        ctx.fillRect(x + 3, y + 4, 2, 1);
-
-        ctx.fillStyle = palette.shirt;
-        ctx.fillRect(x + 1, y + 5, 6, 3);
-        ctx.fillStyle = palette.sleeve;
-        ctx.fillRect(x + 1, y + 5, 1, 2);
-        ctx.fillRect(x + 6, y + 5, 1, 2);
-        ctx.fillStyle = palette.belt;
-        ctx.fillRect(x + 1, y + 8, 6, 1);
-
-        ctx.fillStyle = palette.pants;
-        ctx.fillRect(x + 1, y + 9, 6, 2);
-        ctx.fillStyle = palette.boot;
-        ctx.fillRect(x + 1, y + 11, 3, 1);
-        ctx.fillRect(x + 4, y + 11, 3, 1);
+        ctx.fillStyle = "#0d1019";
+        ctx.fillRect(player.x, player.y, player.w, player.h);
+        ctx.fillStyle = "#7ef9ff";
+        ctx.fillRect(player.x + 2, player.y + 2, 6, 4);
+        ctx.fillStyle = "#ff6b6b";
+        ctx.fillRect(player.x + 2, player.y + 6, 6, 3);
+        ctx.fillStyle = "#2b2f3a";
+        ctx.fillRect(player.x + 2, player.y + 9, 6, 2);
       }
 
-      function drawVictory() {
-        ctx.fillStyle = "rgba(4, 8, 20, 0.35)";
-        ctx.fillRect(0, 0, world.width, 26);
-        ctx.fillStyle = "#f8ffec";
-        ctx.font = "10px 'Trebuchet MS', sans-serif";
-        ctx.fillText("Neonvale Restored ✨", 90, 16);
+      function drawLighting() {
+        const time = state.timeOfDay;
+        let skyColor = palette.day;
+        if (time < 0.3) skyColor = colorBlend(palette.night, palette.dawn, time / 0.3);
+        else if (time < 0.6) skyColor = colorBlend(palette.dawn, palette.day, (time - 0.3) / 0.3);
+        else if (time < 0.85) skyColor = colorBlend(palette.day, palette.dawn, (time - 0.6) / 0.25);
+        else skyColor = colorBlend(palette.dawn, palette.night, (time - 0.85) / 0.15);
+
+        ctx.fillStyle = skyColor;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const darkness = clamp(0.75 - state.lightLevel / 160, 0.2, 0.75);
+        ctx.fillStyle = `rgba(4, 6, 12, ${darkness})`;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
       }
 
-      function update() {
-        handleInput();
-        if (!lightNode.activated && playerHitsNode()) {
-          lightNode.activated = true;
+      function drawHud() {
+        ctx.fillStyle = palette.uiDark;
+        ctx.fillRect(6, 6, 160, 36);
+        ctx.fillRect(6, 48, 160, 38);
+
+        // Energy
+        ctx.fillStyle = "#1a2538";
+        ctx.fillRect(14, 14, 120, 8);
+        ctx.fillStyle = palette.neon;
+        ctx.fillRect(14, 14, (state.energy / state.maxEnergy) * 120, 8);
+        ctx.fillStyle = palette.uiLight;
+        ctx.font = "8px 'Trebuchet MS', sans-serif";
+        ctx.fillText(`Energy ${Math.round(state.energy)}/${state.maxEnergy}`, 14, 32);
+
+        // Time + quest
+        ctx.fillStyle = palette.uiLight;
+        ctx.fillText(`Day ${state.day} | ${formatTime(state.timeOfDay)}`, 14, 60);
+        const quest = state.quests[state.activeQuest];
+        ctx.fillText(`Quest: ${quest.title}`, 14, 72);
+
+        // Inventory grid
+        ctx.fillStyle = palette.uiDark;
+        ctx.fillRect(200, 6, 114, 50);
+        drawInventorySlot(208, 14, "Scrap", state.resources.scrap, palette.resourceScrap);
+        drawInventorySlot(244, 14, "Cells", state.resources.cells, palette.resourceCell);
+        drawInventorySlot(280, 14, "Shards", state.resources.shards, palette.resourceShard);
+
+        // Light level + quest log
+        ctx.fillStyle = palette.uiDark;
+        ctx.fillRect(200, 62, 114, 52);
+        ctx.fillStyle = palette.uiLight;
+        ctx.fillText(`Light ${Math.round(state.lightLevel)}%`, 208, 78);
+        ctx.fillText("Quest Log", 208, 92);
+        ctx.fillText(formatQuestLine(state.quests.main), 208, 104);
+        ctx.fillText(formatQuestLine(state.quests.side), 208, 114);
+
+        // Hint bar
+        ctx.fillStyle = palette.uiDark;
+        ctx.fillRect(6, 140, 308, 32);
+        ctx.fillStyle = palette.uiLight;
+        ctx.fillText(state.hint, 14, 160);
+
+        if (state.dialogue) {
+          ctx.fillStyle = palette.uiDark;
+          ctx.fillRect(40, 100, 240, 28);
+          ctx.fillStyle = palette.uiLight;
+          ctx.fillText(state.dialogue, 48, 118);
+        }
+      }
+
+      function drawInventorySlot(x, y, label, value, color) {
+        ctx.fillStyle = "rgba(10, 14, 24, 0.8)";
+        ctx.fillRect(x, y, 28, 28);
+        ctx.fillStyle = color;
+        ctx.fillRect(x + 8, y + 8, 12, 12);
+        ctx.fillStyle = palette.uiLight;
+        ctx.fillText(value.toString(), x + 9, y + 24);
+      }
+
+      function drawRepairUI() {
+        if (!state.repair.active) return;
+        ctx.fillStyle = palette.uiDark;
+        ctx.fillRect(60, 76, 200, 28);
+        ctx.fillStyle = "#1b2a3f";
+        ctx.fillRect(70, 86, 180, 8);
+        ctx.fillStyle = palette.warning;
+        ctx.fillRect(70, 86, state.repair.progress * 180, 8);
+        ctx.fillStyle = palette.uiLight;
+        ctx.fillText("Hold E or Space to charge", 90, 98);
+      }
+
+      function drawPauseMenu() {
+        if (!state.paused) return;
+        ctx.fillStyle = "rgba(3, 6, 12, 0.7)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = palette.uiLight;
+        ctx.font = "12px 'Trebuchet MS', sans-serif";
+        ctx.fillText("Paused", 140, 80);
+        ctx.font = "9px 'Trebuchet MS', sans-serif";
+        ctx.fillText("Press P to resume", 118, 100);
+      }
+
+      function formatTime(t) {
+        const totalMinutes = Math.floor(t * 24 * 60);
+        const hours = Math.floor(totalMinutes / 60) % 24;
+        const minutes = totalMinutes % 60;
+        const period = hours >= 12 ? "PM" : "AM";
+        const displayHour = hours % 12 === 0 ? 12 : hours % 12;
+        return `${displayHour}:${minutes.toString().padStart(2, "0")} ${period}`;
+      }
+
+      function formatQuestLine(quest) {
+        const statusIcon = quest.status === "complete" ? "✓" : "•";
+        return `${statusIcon} ${quest.title}`;
+      }
+
+      // =========================
+      // Game Loop
+      // =========================
+      function update(timestamp) {
+        const dt = clamp((timestamp - lastTime) / 1000, 0, 0.05);
+        lastTime = timestamp;
+
+        if (!state.paused) {
+          state.dialogue = "";
+          movePlayer(dt);
+          updateNpc(dt);
+          updateRepair(dt);
+          updateDayCycle(dt);
+          updateQuestProgress();
+
+          state.saveTimer += dt;
+          if (state.saveTimer > 10) {
+            saveGame();
+            state.saveTimer = 0;
+          }
         }
 
-        if (lightNode.activated) {
-          restoration = clamp(restoration + 0.006, 0, 1);
-          sparkleTimer += 0.1;
-        }
+        setHint(generateHint());
 
-        drawScene();
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        drawLighting();
+        drawMap();
+        drawResources();
+        drawLightNode();
+        drawNpc();
+        drawPlayer();
+        drawHud();
+        drawRepairUI();
+        drawPauseMenu();
+
         requestAnimationFrame(update);
       }
 
+      function generateHint() {
+        if (state.paused) return "Paused";
+        if (state.repair.active) return "Hold E / Space to charge the repair.";
+        if (distance(player, lightNode) < 20 && !lightNode.restored) {
+          return canAfford(lightNode.requirements)
+            ? "Press R to start repairing the Light Node."
+            : "Need Scrap x3, Cells x1, Shards x2.";
+        }
+        if (distance(player, npc) < 18) return "Press E to talk to Mira.";
+        const resourceNearby = resources.some(
+          (node) => node.available && Math.hypot(node.x - player.x, node.y - player.y) < 16
+        );
+        if (resourceNearby) return "Press E to collect resources.";
+        return "Explore, gather resources, and restore light.";
+      }
+
+      // =========================
+      // Event Handling
+      // =========================
       window.addEventListener("keydown", (event) => {
-        keys.add(event.key);
+        keys.add(event.key.toLowerCase());
+        if (event.key === "p") {
+          state.paused = !state.paused;
+        }
+        if (event.key === "e" || event.key === " ") {
+          collectResource();
+          handleNpcInteraction();
+        }
+        if (event.key === "r") {
+          startRepair();
+        }
       });
 
       window.addEventListener("keyup", (event) => {
-        keys.delete(event.key);
+        keys.delete(event.key.toLowerCase());
       });
 
-      update();
+      // =========================
+      // Boot
+      // =========================
+      loadGame();
+      requestAnimationFrame(update);
     </script>
   </body>
 </html>
