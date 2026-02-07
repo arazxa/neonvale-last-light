@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Last Light of Neonvale</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+      }
+
+      body {
+        margin: 0;
+        background: radial-gradient(circle at top, #0b0f1a, #040408 60%);
+        color: #c9f7ff;
+        display: flex;
+        min-height: 100vh;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .frame {
+        display: grid;
+        gap: 12px;
+        justify-items: center;
+      }
+
+      canvas {
+        width: min(960px, 92vw);
+        height: auto;
+        image-rendering: pixelated;
+        border: 3px solid #1d3244;
+        border-radius: 8px;
+        box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+        background: #040408;
+      }
+
+      .panel {
+        max-width: 960px;
+        text-align: center;
+        line-height: 1.5;
+        font-size: 0.98rem;
+        opacity: 0.9;
+      }
+
+      .panel strong {
+        color: #7ef9ff;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <canvas id="game" width="320" height="180" aria-label="Last Light of Neonvale"></canvas>
+      <div class="panel">
+        <div><strong>Move:</strong> Arrow keys or WASD</div>
+        <div>Find the Light Node and restore Neonvale.</div>
+      </div>
+    </div>
+
+    <script>
+      const canvas = document.getElementById("game");
+      const ctx = canvas.getContext("2d");
+
+      const world = {
+        width: 320,
+        height: 180,
+        streets: [
+          { y: 112, height: 22 },
+          { y: 140, height: 18 },
+        ],
+        buildings: [
+          { x: 24, y: 40, w: 46, h: 58 },
+          { x: 78, y: 22, w: 44, h: 76 },
+          { x: 130, y: 50, w: 34, h: 48 },
+          { x: 172, y: 30, w: 52, h: 70 },
+          { x: 228, y: 42, w: 58, h: 64 },
+        ],
+      };
+
+      const player = {
+        x: 32,
+        y: 132,
+        w: 8,
+        h: 12,
+        speed: 1.1,
+      };
+
+      const lightNode = {
+        x: 272,
+        y: 108,
+        w: 14,
+        h: 18,
+        activated: false,
+      };
+
+      const keys = new Set();
+      let restoration = 0;
+      let sparkleTimer = 0;
+
+      const colors = {
+        skyDark: "#020208",
+        skyLight: "#0d1d38",
+        groundDark: "#040408",
+        groundLight: "#1c3c2c",
+        buildingDark: "#121620",
+        buildingLight: "#1e2c44",
+        neonEdge: "#2ffbff",
+        lightNodeOff: "#26303b",
+        lightNodeOn: "#ffe66b",
+        player: "#4ff2ff",
+      };
+
+      function lerpColor(a, b, t) {
+        const parse = (hex) => hex.match(/\w\w/g).map((v) => parseInt(v, 16));
+        const [ar, ag, ab] = parse(a);
+        const [br, bg, bb] = parse(b);
+        const r = Math.round(ar + (br - ar) * t);
+        const g = Math.round(ag + (bg - ag) * t);
+        const b2 = Math.round(ab + (bb - ab) * t);
+        return `rgb(${r}, ${g}, ${b2})`;
+      }
+
+      function clamp(value, min, max) {
+        return Math.max(min, Math.min(max, value));
+      }
+
+      function handleInput() {
+        let dx = 0;
+        let dy = 0;
+        if (keys.has("ArrowLeft") || keys.has("a")) dx -= 1;
+        if (keys.has("ArrowRight") || keys.has("d")) dx += 1;
+        if (keys.has("ArrowUp") || keys.has("w")) dy -= 1;
+        if (keys.has("ArrowDown") || keys.has("s")) dy += 1;
+
+        if (dx !== 0 && dy !== 0) {
+          dx *= 0.7;
+          dy *= 0.7;
+        }
+
+        player.x = clamp(player.x + dx * player.speed, 10, world.width - 10);
+        player.y = clamp(player.y + dy * player.speed, 96, world.height - 16);
+      }
+
+      function playerHitsNode() {
+        return (
+          player.x < lightNode.x + lightNode.w &&
+          player.x + player.w > lightNode.x &&
+          player.y < lightNode.y + lightNode.h &&
+          player.y + player.h > lightNode.y
+        );
+      }
+
+      function drawPixelBlock(x, y, w, h, color, edgeColor) {
+        ctx.fillStyle = color;
+        ctx.fillRect(x, y, w, h);
+        ctx.fillStyle = edgeColor;
+        ctx.fillRect(x + 1, y + 1, w - 2, 2);
+        ctx.fillRect(x + 1, y + 1, 2, h - 2);
+      }
+
+      function drawScene() {
+        const sky = lerpColor(colors.skyDark, colors.skyLight, restoration);
+        const ground = lerpColor(colors.groundDark, colors.groundLight, restoration);
+        const building = lerpColor(colors.buildingDark, colors.buildingLight, restoration);
+
+        ctx.fillStyle = sky;
+        ctx.fillRect(0, 0, world.width, world.height);
+
+        world.buildings.forEach((block) => {
+          drawPixelBlock(block.x, block.y, block.w, block.h, building, colors.neonEdge);
+          ctx.fillStyle = restoration > 0.2 ? "rgba(79, 242, 255, 0.3)" : "rgba(0,0,0,0.4)";
+          for (let i = 0; i < block.w; i += 8) {
+            ctx.fillRect(block.x + 4 + i, block.y + 10, 3, 6);
+          }
+        });
+
+        ctx.fillStyle = ground;
+        ctx.fillRect(0, 110, world.width, world.height - 110);
+        world.streets.forEach((street) => {
+          ctx.fillStyle = restoration > 0.1 ? "#13253b" : "#08080d";
+          ctx.fillRect(0, street.y, world.width, street.height);
+        });
+
+        ctx.fillStyle = restoration > 0.3 ? "#49c97b" : "#060709";
+        ctx.fillRect(0, 156, world.width, 24);
+
+        drawLightNode();
+        drawPlayer();
+
+        if (restoration >= 1) {
+          drawVictory();
+        }
+      }
+
+      function drawLightNode() {
+        const glow = lightNode.activated
+          ? `rgba(255, 230, 107, ${0.6 + Math.sin(sparkleTimer) * 0.2})`
+          : "rgba(20, 30, 40, 0.5)";
+        ctx.fillStyle = glow;
+        ctx.fillRect(lightNode.x - 4, lightNode.y - 4, lightNode.w + 8, lightNode.h + 8);
+
+        ctx.fillStyle = lightNode.activated ? colors.lightNodeOn : colors.lightNodeOff;
+        ctx.fillRect(lightNode.x, lightNode.y, lightNode.w, lightNode.h);
+        ctx.fillStyle = "#1b1f2b";
+        ctx.fillRect(lightNode.x + 3, lightNode.y + 4, lightNode.w - 6, 4);
+        ctx.fillStyle = lightNode.activated ? "#fff3c9" : "#38404a";
+        ctx.fillRect(lightNode.x + 2, lightNode.y + 10, lightNode.w - 4, 4);
+      }
+
+      function drawPlayer() {
+        ctx.fillStyle = colors.player;
+        ctx.fillRect(player.x, player.y, player.w, player.h);
+        ctx.fillStyle = "#0e141f";
+        ctx.fillRect(player.x + 2, player.y + 3, 2, 2);
+        ctx.fillRect(player.x + 5, player.y + 3, 2, 2);
+        ctx.fillStyle = "#9ef9ff";
+        ctx.fillRect(player.x + 3, player.y + 7, 2, 2);
+      }
+
+      function drawVictory() {
+        ctx.fillStyle = "rgba(4, 8, 20, 0.35)";
+        ctx.fillRect(0, 0, world.width, 26);
+        ctx.fillStyle = "#f8ffec";
+        ctx.font = "10px 'Trebuchet MS', sans-serif";
+        ctx.fillText("Neonvale Restored ✨", 90, 16);
+      }
+
+      function update() {
+        handleInput();
+        if (!lightNode.activated && playerHitsNode()) {
+          lightNode.activated = true;
+        }
+
+        if (lightNode.activated) {
+          restoration = clamp(restoration + 0.006, 0, 1);
+          sparkleTimer += 0.1;
+        }
+
+        drawScene();
+        requestAnimationFrame(update);
+      }
+
+      window.addEventListener("keydown", (event) => {
+        keys.add(event.key);
+      });
+
+      window.addEventListener("keyup", (event) => {
+        keys.delete(event.key);
+      });
+
+      update();
+    </script>
+  </body>
+</html>
