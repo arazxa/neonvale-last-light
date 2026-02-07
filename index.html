@@ -209,13 +209,54 @@
       }
 
       function drawPlayer() {
-        ctx.fillStyle = colors.player;
-        ctx.fillRect(player.x, player.y, player.w, player.h);
-        ctx.fillStyle = "#0e141f";
-        ctx.fillRect(player.x + 2, player.y + 3, 2, 2);
-        ctx.fillRect(player.x + 5, player.y + 3, 2, 2);
-        ctx.fillStyle = "#9ef9ff";
-        ctx.fillRect(player.x + 3, player.y + 7, 2, 2);
+        const x = player.x;
+        const y = player.y;
+        const palette = {
+          outline: "#0c0f16",
+          hair: "#2b1b14",
+          bandana: "#e6403a",
+          skin: "#ffb266",
+          highlight: "#ffd7a8",
+          shirt: "#c5392f",
+          sleeve: "#c6c9d1",
+          belt: "#1f2329",
+          pants: "#d42d2d",
+          boot: "#1d1f24",
+        };
+
+        ctx.fillStyle = palette.outline;
+        ctx.fillRect(x, y, player.w, player.h);
+
+        ctx.fillStyle = palette.skin;
+        ctx.fillRect(x + 1, y + 1, 6, 4);
+        ctx.fillStyle = palette.hair;
+        ctx.fillRect(x + 1, y + 1, 6, 1);
+        ctx.fillRect(x + 1, y + 1, 2, 2);
+        ctx.fillRect(x + 5, y + 1, 2, 2);
+
+        ctx.fillStyle = palette.bandana;
+        ctx.fillRect(x + 1, y + 2, 6, 1);
+        ctx.fillRect(x, y + 3, 1, 1);
+
+        ctx.fillStyle = palette.outline;
+        ctx.fillRect(x + 2, y + 3, 1, 1);
+        ctx.fillRect(x + 5, y + 3, 1, 1);
+        ctx.fillStyle = palette.highlight;
+        ctx.fillRect(x + 3, y + 4, 2, 1);
+
+        ctx.fillStyle = palette.shirt;
+        ctx.fillRect(x + 1, y + 5, 6, 3);
+        ctx.fillStyle = palette.sleeve;
+        ctx.fillRect(x + 1, y + 5, 1, 2);
+        ctx.fillRect(x + 6, y + 5, 1, 2);
+        ctx.fillStyle = palette.belt;
+        ctx.fillRect(x + 1, y + 8, 6, 1);
+
+        ctx.fillStyle = palette.pants;
+        ctx.fillRect(x + 1, y + 9, 6, 2);
+        ctx.fillStyle = palette.boot;
+        ctx.fillRect(x + 1, y + 11, 3, 1);
+        ctx.fillRect(x + 4, y + 11, 3, 1);
       }
 
       function drawVictory() {
